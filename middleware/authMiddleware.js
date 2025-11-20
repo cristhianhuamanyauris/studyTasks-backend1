@@ -6,9 +6,11 @@ const authMiddleware = (req, res, next) => {
 
   try {
     const verified = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = verified; // contiene userId
+    // Normalizamos para que todas las rutas usen req.user.id
+    req.user = { id: verified.userId }; 
     next();
   } catch (err) {
+    console.error("AuthMiddleware error:", err);
     res.status(400).json({ message: 'Token inválido' });
   }
 };
