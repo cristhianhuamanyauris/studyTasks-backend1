@@ -55,6 +55,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const profileRoutes = require('./routes/profile');
 require('dotenv').config();
 
 const { initSocket } = require('./socket');
@@ -91,6 +92,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tasks', tasksRoutes);
 app.use('/api/tasks/global', globalTasksRoutes);  // ⭐ REGISTRADA
 app.use('/api/documents', documentRoutes);
+app.use('/api/profile', profileRoutes);  // ⭐ FALTABA ESTA
 
 // -----------------------------
 // 🔌 Servidor HTTP + Socket.io

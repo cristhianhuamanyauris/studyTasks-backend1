@@ -1,44 +1,76 @@
-// routes/auth.js
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/user");
+const uploadAvatar = require("../middleware/uploadAvatar");
 
-// Helpers para generar tokens
+// --------------------------------------
+// HELPERS: GENERAR TOKENS
+// --------------------------------------
 function generateAccessToken(userId) {
   return jwt.sign({ userId }, process.env.JWT_SECRET, {
-    expiresIn: "15m", // access token cortito
+    expiresIn: "15m",
   });
 }
 
 function generateRefreshToken(userId) {
   return jwt.sign({ userId }, process.env.JWT_REFRESH_SECRET, {
-    expiresIn: "7d", // refresh token más largo
+    expiresIn: "7d",
   });
 }
 
-// ==========================
-// 📌 Registro
-// ==========================
+// --------------------------------------
+// 📌 REGISTRO (con avatar y perfil completo)
+// --------------------------------------
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const {
+      firstName,
+      lastName,
+      email,
+      password,
+      phone,
+      birthDate,
+      bio,
+      profession,
+      country,
+      city
+    } = req.body;
 
-    if (!name || !email || !password)
-      return res.status(400).json({ message: "Todos los campos son obligatorios" });
+    // Validación básica
+    if (!firstName || !lastName || !email || !password) {
+      return res.status(400).json({
+        message: "firstName, lastName, email y password son requeridos",
+      });
+    }
 
+    // Evitar duplicados
     const existing = await User.findOne({ email });
-    if (existing)
+    if (existing) {
       return res.status(400).json({ message: "El correo ya está registrado" });
+    }
 
+    // Encriptar contraseña
     const salt = await bcrypt.genSalt(10);
     const hashed = await bcrypt.hash(password, salt);
 
-    const user = await User.create({
-      name,
+    // Avatar (si existe)
+    const avatarPath = req.file ? `/uploads/avatars/${req.file.filename}` : null;
+
+    // Crear usuario
+    await User.create({
+      firstName,
+      lastName,
       email,
       password: hashed,
+      phone,
+      birthDate,
+      bio,
+      profession,
+      country,
+      city,
+      avatar: avatarPath,
     });
 
     res.status(201).json({ message: "Usuario registrado correctamente" });
@@ -48,9 +80,9 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// ==========================
-// 📌 Login
-// ==========================
+// --------------------------------------
+// 📌 LOGIN
+// --------------------------------------
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -69,19 +101,20 @@ router.post("/login", async (req, res) => {
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
 
-    // Guardamos refresh token en cookie httpOnly
     res
       .cookie("refreshToken", refreshToken, {
         httpOnly: true,
-        secure: false, // en producción: true + HTTPS
+        secure: false,
         sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días
+        maxAge: 7 * 24 * 60 * 60 * 1000,
       })
       .json({
         token: accessToken,
         user: {
           id: user._id,
-          name: user.name,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          avatar: user.avatar,
           email: user.email,
         },
       });
@@ -91,10 +124,9 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// ==========================
-// 📌 Refresh token
-//      Genera un NUEVO access token
-// ==========================
+// --------------------------------------
+// 📌 REFRESH TOKEN
+// --------------------------------------
 router.post("/refresh", (req, res) => {
   try {
     const token = req.cookies.refreshToken;
@@ -109,7 +141,6 @@ router.post("/refresh", (req, res) => {
       }
 
       const accessToken = generateAccessToken(payload.userId);
-
       return res.json({ token: accessToken });
     });
   } catch (err) {
@@ -118,9 +149,9 @@ router.post("/refresh", (req, res) => {
   }
 });
 
-// ==========================
-// 📌 Logout (limpia cookie)
-// ==========================
+// --------------------------------------
+// 📌 LOGOUT
+// --------------------------------------
 router.post("/logout", (req, res) => {
   res.clearCookie("refreshToken", {
     httpOnly: true,
