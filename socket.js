@@ -1,10 +1,32 @@
 // socket.js
 const { Server } = require("socket.io");
 const Y = require("yjs");
+const jwt = require("jsonwebtoken");
 const Document = require("./models/document");
 
-// 👇 NO necesitamos awareness en el servidor, solo reenviamos bytes
-const docs = new Map(); // cache en memoria de Y.Doc por documentId
+const docs = new Map();
+const JWT_SECRET = process.env.JWT_SECRET;
+
+// Helper: valida token y devuelve userId
+function verifyToken(token) {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    return decoded.id || decoded._id || decoded.userId;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function userHasAccessToDocument(documentId, userId) {
+  if (!userId) return false;
+
+  const doc = await Document.findOne({
+    _id: documentId,
+    $or: [{ owner: userId }, { collaborators: userId }],
+  });
+
+  return !!doc;
+}
 
 function initSocket(server) {
   const io = new Server(server, {
@@ -17,24 +39,44 @@ function initSocket(server) {
   io.on("connection", (socket) => {
     console.log("🟢 Cliente conectado:", socket.id);
 
-    socket.on("join-document", async ({ documentId }) => {
+    socket.on("join-document", async ({ documentId, token }) => {
       if (!documentId) {
         console.warn("join-document sin documentId");
         return;
       }
 
-      socket.join(documentId);
-      console.log(`Socket ${socket.id} se unió a sala ${documentId}`);
+      const userId = verifyToken(token);
+      if (!userId) {
+        console.warn("join-document sin token válido");
+        socket.emit("join-error", "No autorizado");
+        return;
+      }
 
-      // Obtener o crear Y.Doc en memoria
+      // 🚨 NUEVO: Verificar si el documento existe (puede haber sido eliminado)
+      const existingDoc = await Document.findById(documentId);
+      if (!existingDoc) {
+        console.warn(`Intento de acceso a documento eliminado: ${documentId}`);
+        socket.emit("join-error", "Este documento ha sido eliminado");
+        return;
+      }
+
+      const allowed = await userHasAccessToDocument(documentId, userId);
+      if (!allowed) {
+        console.warn(`Usuario ${userId} sin acceso a doc ${documentId}`);
+        socket.emit("join-error", "No tienes acceso a este documento");
+        return;
+      }
+
+      socket.join(documentId);
+      console.log(`Socket ${socket.id} (user ${userId}) se unió a sala ${documentId}`);
+
       let ydoc = docs.get(documentId);
       if (!ydoc) {
         ydoc = new Y.Doc();
         docs.set(documentId, ydoc);
 
-        // Intentar cargar desde BD si existe
         try {
-          const dbDoc = await Document.findById(documentId);
+          const dbDoc = existingDoc;
           if (dbDoc && dbDoc.content) {
             let u8;
 
@@ -52,7 +94,6 @@ function initSocket(server) {
 
             if (u8 && u8.length) {
               try {
-                // Aplicamos snapshot completo de Yjs
                 Y.applyUpdate(ydoc, u8, "socket");
                 console.log(`Contenido cargado desde BD para doc ${documentId}`);
               } catch (err) {
@@ -67,7 +108,7 @@ function initSocket(server) {
         }
       }
 
-      // Enviar estado actual (snapshot completo)
+      // Enviar estado actual
       try {
         const update = Y.encodeStateAsUpdate(ydoc);
         socket.emit("document-state", Array.from(update));
@@ -75,7 +116,7 @@ function initSocket(server) {
         console.error("Error enviando estado inicial:", err);
       }
 
-      // Escuchar updates de contenido (Yjs)
+      // Updates de contenido
       socket.on("sync-update", (incoming) => {
         try {
           const u8 =
@@ -83,19 +124,16 @@ function initSocket(server) {
               ? incoming
               : Array.isArray(incoming)
               ? Uint8Array.from(incoming)
-              : new Uint8Array(incoming); // fallback
+              : new Uint8Array(incoming);
 
-          // Aplicar al Y.Doc del servidor (marcado como origen "socket")
           Y.applyUpdate(ydoc, u8, "socket");
-
-          // Reenviar a otros clientes en la sala
           socket.to(documentId).emit("sync-update", Array.from(u8));
         } catch (err) {
           console.error("Error aplicando/reenviando update:", err);
         }
       });
 
-      // 🔵 Awareness: reenviamos updates de presencia (cursores, etc.)
+      // Awareness
       socket.on("awareness-update", (incoming) => {
         try {
           const u8 =
@@ -105,14 +143,13 @@ function initSocket(server) {
               ? Uint8Array.from(incoming)
               : new Uint8Array(incoming);
 
-          // Simplemente reenviamos a los demás en la sala
           socket.to(documentId).emit("awareness-update", Array.from(u8));
         } catch (err) {
           console.error("Error reenviando awareness-update:", err);
         }
       });
 
-      // Guardar documento en BD cuando se solicite
+      // Guardar desde el cliente
       socket.on("save-document", async () => {
         try {
           const snapshot = Y.encodeStateAsUpdate(ydoc);
@@ -126,15 +163,12 @@ function initSocket(server) {
         }
       });
 
-      // Manejar desconexión del socket
       socket.on("disconnect", () => {
         console.log("🔴 Cliente desconectado:", socket.id, "de doc", documentId);
 
-        // Pequeño delay para permitir reconexiones rápidas
         setTimeout(async () => {
           const room = io.sockets.adapter.rooms.get(documentId);
 
-          // Si ya no queda nadie en la sala, podemos liberar memoria
           if (!room || room.size === 0) {
             const ydocToSave = docs.get(documentId);
 
@@ -155,7 +189,7 @@ function initSocket(server) {
               console.log(`🧹 Y.Doc de ${documentId} eliminado de memoria`);
             }
           }
-        }, 30000); // 30s de gracia
+        }, 30000);
       });
     });
   });

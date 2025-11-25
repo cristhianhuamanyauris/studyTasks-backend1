@@ -25,6 +25,7 @@ function generateRefreshToken(userId) {
 // --------------------------------------
 router.post("/register", async (req, res) => {
   try {
+    console.log("BODY RECIBIDO:", req.body);
     const {
       firstName,
       lastName,
@@ -56,7 +57,8 @@ router.post("/register", async (req, res) => {
     const hashed = await bcrypt.hash(password, salt);
 
     // Avatar (si existe)
-    const avatarPath = req.file ? `/uploads/avatars/${req.file.filename}` : null;
+    const avatarPath = null;
+
 
     // Crear usuario
     await User.create({
@@ -78,6 +80,8 @@ router.post("/register", async (req, res) => {
     console.error("Error en /register:", err);
     res.status(500).json({ message: "Error en el servidor" });
   }
+
+
 });
 
 // --------------------------------------
