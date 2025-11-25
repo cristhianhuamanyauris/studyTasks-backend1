@@ -164,6 +164,58 @@ router.get("/:id", authMiddleware, async (req, res) => {
 });
 
 // ===============================================================
+// 📌 ACTUALIZAR DOCUMENTO (Título) + FileNode.name
+// ===============================================================
+router.put("/:id", authMiddleware, async (req, res) => {
+  try {
+    const { title } = req.body;
+    const docId = req.params.id;
+    const userId = req.user.id;
+
+    if (!title || title.trim() === "")
+      return res
+        .status(400)
+        .json({ message: "El título es obligatorio" });
+
+    // 1️⃣ Verificar permisos
+    const doc = await Document.findOne({
+      _id: docId,
+      $or: [{ owner: userId }, { collaborators: userId }],
+    });
+
+    if (!doc)
+      return res
+        .status(403)
+        .json({ message: "No tienes permisos para editar este documento" });
+
+    // 2️⃣ Actualizar título del documento
+    doc.title = title;
+    await doc.save();
+
+    // 3️⃣ Actualizar nombre en FileNode(s) asociados
+    const fileNodes = await FileNode.find({ documentId: docId });
+
+    for (const node of fileNodes) {
+      node.name = title;
+      await node.save();
+    }
+
+    const updated = await Document.findById(docId)
+      .populate("owner", "name email")
+      .populate("collaborators", "name email");
+
+    res.json({
+      ...updated.toObject(),
+      fileNodeId: fileNodes[0]?._id || null,
+    });
+  } catch (err) {
+    console.error("Error actualizando documento:", err);
+    res.status(500).json({ message: "Error actualizando documento" });
+  }
+});
+
+
+// ===============================================================
 // 📌 Invitar colaborador (HERENCIA INVERSA COMPLETA)
 // ===============================================================
 router.post("/:id/collaborators", authMiddleware, async (req, res) => {
