@@ -23,14 +23,16 @@ const PORT = process.env.PORT || 5000;
 // -----------------------------
 // 🌐 CORS
 // -----------------------------
-app.use(
-  cors({
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true,
-  })
-);
-
+app.use(cors({
+  origin: [
+    "http://localhost:3000", 
+    "http://mern-block-cloud-g3.s3-website.us-east-2.amazonaws.com",
+    "https://mern-block-cloud-g3.s3-website.us-east-2.amazonaws.com"
+  ],
+  credentials: true,
+  methods: "GET,POST,PUT,DELETE,OPTIONS",
+  allowedHeaders: "Content-Type, Authorization"
+}));
 app.use(express.json());
 app.use(cookieParser());
 
